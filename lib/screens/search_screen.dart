@@ -14,6 +14,8 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _mainSearchController = TextEditingController();
   final TextEditingController _filterController = TextEditingController();
+
+  // Updated filter options per original design.
   final List<String> _filterOptions = [
     'id',
     'title',
@@ -24,13 +26,14 @@ class _SearchScreenState extends State<SearchScreen> {
   ];
   String _selectedFilter = 'id';
   String _selectedTrackType = 'all';
+
+  // Pagination state.
   int _currentPage = 0;
   int _totalResults = 0;
-  final int _rowsPerPage = 20;
+  final int _rowsPerPage = 10;
   List<Track> _tracks = [];
   String _statusMessage = "";
 
-  // Calculate total pages based on total results and rows per page.
   int get _totalPages => (_totalResults / _rowsPerPage).ceil();
 
   Future<void> _performSearch() async {
@@ -38,13 +41,15 @@ class _SearchScreenState extends State<SearchScreen> {
       _statusMessage = "Searching...";
     });
     try {
-      // Retrieve the total count first.
+      // Get total count for pagination.
       int count = await DatabaseService.searchTracksCount(
         mainSearchTerm: _mainSearchController.text.trim(),
         filterField: _selectedFilter,
         filterValue: _filterController.text.trim(),
         trackTypeFilter: _selectedTrackType,
       );
+
+      // Fetch tracks for the current page.
       List<Track> results = await DatabaseService.searchTracks(
         mainSearchTerm: _mainSearchController.text.trim(),
         filterField: _selectedFilter,
@@ -53,6 +58,7 @@ class _SearchScreenState extends State<SearchScreen> {
         pageSize: _rowsPerPage,
         trackTypeFilter: _selectedTrackType,
       );
+
       setState(() {
         _tracks = results;
         _totalResults = count;
@@ -65,7 +71,7 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
-  /// Resets all search inputs and clears the results.
+  /// Clears all inputs and resets search state.
   void _clearAll() {
     setState(() {
       _mainSearchController.clear();
@@ -79,7 +85,6 @@ class _SearchScreenState extends State<SearchScreen> {
     });
   }
 
-  /// Builds a toggle button for selecting track type.
   Widget _buildToggleButton(String label, String value) {
     bool isSelected = _selectedTrackType == value;
     return ElevatedButton(
@@ -97,7 +102,167 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// Builds the pagination controls as "< [Icon] Page X of Y [Icon] >"
+  /// Builds the search controls all on one horizontal line.
+  Widget _buildSearchControls() {
+    return Container(
+      width: MediaQuery.of(context).size.width,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            // Full-text search field.
+            SizedBox(
+              width: 200,
+              child: TextField(
+                controller: _mainSearchController,
+                decoration: const InputDecoration(
+                  labelText: 'Search (FTS)',
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (_) {
+                  _currentPage = 0;
+                  _performSearch();
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Filter by dropdown.
+            SizedBox(
+              width: 120,
+              child: DropdownButtonFormField<String>(
+                isExpanded: true,
+                value: _selectedFilter,
+                icon: const Icon(Icons.arrow_drop_down, size: 24),
+                items:
+                    _filterOptions.map((option) {
+                      return DropdownMenuItem(
+                        value: option,
+                        child: Text(option, overflow: TextOverflow.ellipsis),
+                      );
+                    }).toList(),
+                decoration: const InputDecoration(
+                  labelText: 'Filter by',
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 10,
+                  ),
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (val) {
+                  if (val != null) {
+                    setState(() {
+                      _selectedFilter = val;
+                    });
+                  }
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Filter value field.
+            SizedBox(
+              width: 150,
+              child: TextField(
+                controller: _filterController,
+                decoration: const InputDecoration(
+                  labelText: 'Filter value',
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (_) {
+                  _currentPage = 0;
+                  _performSearch();
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Toggle buttons.
+            _buildToggleButton('All', 'all'),
+            const SizedBox(width: 4),
+            _buildToggleButton('Instrumental', 'instrumental'),
+            const SizedBox(width: 4),
+            _buildToggleButton('Vocal', 'vocal'),
+            const SizedBox(width: 4),
+            _buildToggleButton('Solo', 'solo'),
+            const SizedBox(width: 8),
+            // Search button.
+            ElevatedButton(
+              onPressed: () {
+                _currentPage = 0;
+                _performSearch();
+              },
+              child: const Text("Search"),
+            ),
+            const SizedBox(width: 8),
+            // Clear All button.
+            ElevatedButton.icon(
+              onPressed: _clearAll,
+              icon: const Icon(Icons.clear),
+              label: const Text("Clear All"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade100,
+                foregroundColor: Colors.red.shade900,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Builds the result row with:
+  /// 1) First line: ID, title, and description in one Row
+  /// 2) Second line: AudioPlayerWidget for album cover, play button, and waveform
+  Widget _buildResultRow(Track track) {
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        // Use a Column to stack two rows (ID/Title/Desc row, then Audio row).
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // First line: ID, title, description
+            Row(
+              children: [
+                // ID
+                Text(
+                  "ID: ${track.id}",
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(width: 16),
+                // Title (expand for horizontal space)
+                Expanded(
+                  flex: 1,
+                  child: Text(
+                    track.title,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                // Description (expand more for horizontal space)
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    track.description,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // Second line: The audio player widget.
+            // Key ensures separate state for each track.
+            AudioPlayerWidget(key: ValueKey(track.id), track: track),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Builds pagination controls: "< [icon] Page X of Y [icon] >"
   Widget _buildPagination() {
     if (_totalPages <= 1) return const SizedBox.shrink();
     return Row(
@@ -140,140 +305,18 @@ class _SearchScreenState extends State<SearchScreen> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            // Search input row.
-            Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: TextField(
-                    controller: _mainSearchController,
-                    decoration: const InputDecoration(
-                      labelText: 'Search (FTS)',
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) {
-                      _currentPage = 0;
-                      _performSearch();
-                    },
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  flex: 1,
-                  child: DropdownButtonFormField<String>(
-                    value: _selectedFilter,
-                    items:
-                        _filterOptions.map((option) {
-                          return DropdownMenuItem(
-                            value: option,
-                            child: Text(option),
-                          );
-                        }).toList(),
-                    decoration: const InputDecoration(
-                      labelText: 'Filter by',
-                      border: OutlineInputBorder(),
-                    ),
-                    onChanged: (val) {
-                      if (val != null) {
-                        setState(() {
-                          _selectedFilter = val;
-                        });
-                      }
-                    },
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  flex: 1,
-                  child: TextField(
-                    controller: _filterController,
-                    decoration: const InputDecoration(
-                      labelText: 'Filter value',
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) {
-                      _currentPage = 0;
-                      _performSearch();
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            // Clear All button.
-            ElevatedButton.icon(
-              onPressed: _clearAll,
-              icon: const Icon(Icons.clear),
-              label: const Text("Clear All"),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red.shade100,
-                foregroundColor: Colors.red.shade900,
-              ),
-            ),
-            const SizedBox(height: 16),
-            // Track type toggle buttons.
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildToggleButton('All', 'all'),
-                _buildToggleButton('Instrumental', 'instrumental'),
-                _buildToggleButton('Vocal', 'vocal'),
-                _buildToggleButton('Solo', 'solo'),
-              ],
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () {
-                _currentPage = 0;
-                _performSearch();
-              },
-              child: const Text("Search"),
-            ),
+            _buildSearchControls(),
             const SizedBox(height: 16),
             if (_statusMessage.isNotEmpty) Text(_statusMessage),
-            // List of search results.
             Expanded(
               child: ListView.builder(
                 itemCount: _tracks.length,
                 itemBuilder: (context, index) {
                   final track = _tracks[index];
-                  return Card(
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    child: Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Display the track's ID first.
-                          Text(
-                            "ID: ${track.id}",
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            track.title,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            track.description,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 8),
-                          // Assign a unique key based on the track's ID.
-                          AudioPlayerWidget(
-                            key: ValueKey(track.id),
-                            track: track,
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
+                  return _buildResultRow(track);
                 },
               ),
             ),
-            // Pagination controls.
             _buildPagination(),
           ],
         ),

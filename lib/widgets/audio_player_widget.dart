@@ -43,6 +43,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
   Duration _position = Duration.zero;
   bool _isPlaying = false;
   final double coverSize = 60;
+  // Ideal width for waveform: 250 * 4 = 1000 pixels.
   final double waveformWidth = 250 * 4;
 
   @override
@@ -62,12 +63,14 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
       debugPrint("Audio duration: $_duration");
 
       _player.positionStream.listen((pos) {
+        if (!mounted) return;
         debugPrint("Audio position updated: $pos");
         setState(() {
           _position = pos;
         });
       });
       _player.playerStateStream.listen((state) {
+        if (!mounted) return;
         debugPrint("Audio player state: playing = ${state.playing}");
         setState(() {
           _isPlaying = state.playing;
@@ -79,12 +82,10 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
   }
 
   Future<void> _togglePlayPause() async {
-    // Log the current action and file
     if (_isPlaying) {
       debugPrint("Pausing audio: ${widget.track.audioPath}");
       await GlobalAudioManager.pause(_player);
     } else {
-      // Log file path when play is triggered.
       debugPrint("Playing audio file: ${widget.track.audioPath}");
       if (_position >= (_duration ?? Duration.zero)) {
         debugPrint("Restarting audio from beginning.");
@@ -132,6 +133,8 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
     }
   }
 
+  /// Builds the waveform widget wrapped in a SingleChildScrollView so that if the
+  /// fixed width (ideal 1000 pixels) is larger than available space, it allows horizontal scrolling.
   Widget _buildWaveform() {
     double progressFraction = 0.0;
     if (_duration != null && _duration!.inMilliseconds > 0) {
@@ -139,8 +142,8 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
       progressFraction = progressFraction.clamp(0.0, 1.0);
     }
     final overlayWidth = waveformWidth * progressFraction;
-    return GestureDetector(
-      onTapDown: _onWaveformTap,
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
       child: Container(
         width: waveformWidth,
         height: coverSize,
@@ -199,7 +202,9 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
           icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
           onPressed: _togglePlayPause,
         ),
-        _buildWaveform(),
+        // The waveform widget is wrapped in an Expanded to let it use available space,
+        // but its internal SingleChildScrollView will let the user scroll horizontally.
+        Expanded(child: _buildWaveform()),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8.0),
           child: Text(
