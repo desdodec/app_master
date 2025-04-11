@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/track.dart';
 import '../services/database_service.dart';
 import '../widgets/audio_player_widget.dart';
-import 'package:flutter/foundation.dart'; // for debugPrint
+import 'package:flutter/foundation.dart'; // For debugPrint
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({Key? key}) : super(key: key);
@@ -15,7 +15,7 @@ class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _mainSearchController = TextEditingController();
   final TextEditingController _filterController = TextEditingController();
 
-  // Updated filter options per original design.
+  // Updated filter options.
   final List<String> _filterOptions = [
     'id',
     'title',
@@ -41,7 +41,6 @@ class _SearchScreenState extends State<SearchScreen> {
       _statusMessage = "Searching...";
     });
     try {
-      // Get total count for pagination.
       int count = await DatabaseService.searchTracksCount(
         mainSearchTerm: _mainSearchController.text.trim(),
         filterField: _selectedFilter,
@@ -49,7 +48,6 @@ class _SearchScreenState extends State<SearchScreen> {
         trackTypeFilter: _selectedTrackType,
       );
 
-      // Fetch tracks for the current page.
       List<Track> results = await DatabaseService.searchTracks(
         mainSearchTerm: _mainSearchController.text.trim(),
         filterField: _selectedFilter,
@@ -71,7 +69,6 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
-  /// Clears all inputs and resets search state.
   void _clearAll() {
     setState(() {
       _mainSearchController.clear();
@@ -104,7 +101,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   /// Builds the search controls all on one horizontal line.
   Widget _buildSearchControls() {
-    return Container(
+    return SizedBox(
       width: MediaQuery.of(context).size.width,
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -209,28 +206,25 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// Builds the result row with:
-  /// 1) First line: ID, title, and description in one Row
-  /// 2) Second line: AudioPlayerWidget for album cover, play button, and waveform
+  /// Builds each result row with two lines:
+  /// First line: ID, title, and description.
+  /// Second line: AudioPlayerWidget.
   Widget _buildResultRow(Track track) {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8),
       child: Padding(
         padding: const EdgeInsets.all(8.0),
-        // Use a Column to stack two rows (ID/Title/Desc row, then Audio row).
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // First line: ID, title, description
+            // First line: ID, title, and description.
             Row(
               children: [
-                // ID
                 Text(
                   "ID: ${track.id}",
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(width: 16),
-                // Title (expand for horizontal space)
                 Expanded(
                   flex: 1,
                   child: Text(
@@ -241,7 +235,6 @@ class _SearchScreenState extends State<SearchScreen> {
                   ),
                 ),
                 const SizedBox(width: 16),
-                // Description (expand more for horizontal space)
                 Expanded(
                   flex: 2,
                   child: Text(
@@ -253,8 +246,7 @@ class _SearchScreenState extends State<SearchScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            // Second line: The audio player widget.
-            // Key ensures separate state for each track.
+            // Second line: AudioPlayerWidget.
             AudioPlayerWidget(key: ValueKey(track.id), track: track),
           ],
         ),
@@ -262,7 +254,7 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// Builds pagination controls: "< [icon] Page X of Y [icon] >"
+  /// Builds pagination controls in the format "< [icon] Page X of Y [icon] >"
   Widget _buildPagination() {
     if (_totalPages <= 1) return const SizedBox.shrink();
     return Row(

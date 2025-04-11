@@ -81,20 +81,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
     }
   }
 
-  Future<void> _togglePlayPause() async {
-    if (_isPlaying) {
-      debugPrint("Pausing audio: ${widget.track.audioPath}");
-      await GlobalAudioManager.pause(_player);
-    } else {
-      debugPrint("Playing audio file: ${widget.track.audioPath}");
-      if (_position >= (_duration ?? Duration.zero)) {
-        debugPrint("Restarting audio from beginning.");
-        await _player.seek(Duration.zero);
-      }
-      await GlobalAudioManager.play(_player);
-    }
-  }
-
+  // This method is now used by the GestureDetector to handle taps on the waveform.
   Future<void> _onWaveformTap(TapDownDetails details) async {
     final tapX = details.localPosition.dx;
     if (_duration == null || _duration!.inMilliseconds == 0) {
@@ -106,6 +93,20 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
     debugPrint('Waveform tap: seeking to $seekPosition (tap position: $tapX)');
     await _player.seek(seekPosition);
     if (!_isPlaying) {
+      await GlobalAudioManager.play(_player);
+    }
+  }
+
+  Future<void> _togglePlayPause() async {
+    if (_isPlaying) {
+      debugPrint("Pausing audio: ${widget.track.audioPath}");
+      await GlobalAudioManager.pause(_player);
+    } else {
+      debugPrint("Playing audio file: ${widget.track.audioPath}");
+      if (_position >= (_duration ?? Duration.zero)) {
+        debugPrint("Restarting audio from beginning.");
+        await _player.seek(Duration.zero);
+      }
       await GlobalAudioManager.play(_player);
     }
   }
@@ -133,8 +134,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
     }
   }
 
-  /// Builds the waveform widget wrapped in a SingleChildScrollView so that if the
-  /// fixed width (ideal 1000 pixels) is larger than available space, it allows horizontal scrolling.
+  /// Builds the waveform area, now wrapped in a GestureDetector so that taps invoke _onWaveformTap.
   Widget _buildWaveform() {
     double progressFraction = 0.0;
     if (_duration != null && _duration!.inMilliseconds > 0) {
@@ -142,34 +142,18 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
       progressFraction = progressFraction.clamp(0.0, 1.0);
     }
     final overlayWidth = waveformWidth * progressFraction;
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Container(
-        width: waveformWidth,
-        height: coverSize,
-        color: Colors.black12,
-        child: Stack(
-          children: [
-            Image.file(
-              File(widget.track.waveformPath),
-              width: waveformWidth,
-              height: coverSize,
-              fit: BoxFit.fill,
-              errorBuilder: (context, error, stackTrace) {
-                return Container(
-                  width: waveformWidth,
-                  height: coverSize,
-                  color: Colors.blueGrey,
-                  child: Center(
-                    child: Text("Waveform", style: TextStyle(fontSize: 12)),
-                  ),
-                );
-              },
-            ),
-            ClipRect(
-              clipper: _WaveformClipper(overlayWidth),
-              child: Image.file(
-                File(widget.track.waveformOverlayPath),
+    return GestureDetector(
+      onTapDown: _onWaveformTap,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Container(
+          width: waveformWidth,
+          height: coverSize,
+          color: Colors.black12,
+          child: Stack(
+            children: [
+              Image.file(
+                File(widget.track.waveformPath),
                 width: waveformWidth,
                 height: coverSize,
                 fit: BoxFit.fill,
@@ -177,12 +161,31 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
                   return Container(
                     width: waveformWidth,
                     height: coverSize,
-                    color: Colors.transparent,
+                    color: Colors.blueGrey,
+                    child: Center(
+                      child: Text("Waveform", style: TextStyle(fontSize: 12)),
+                    ),
                   );
                 },
               ),
-            ),
-          ],
+              ClipRect(
+                clipper: _WaveformClipper(overlayWidth),
+                child: Image.file(
+                  File(widget.track.waveformOverlayPath),
+                  width: waveformWidth,
+                  height: coverSize,
+                  fit: BoxFit.fill,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      width: waveformWidth,
+                      height: coverSize,
+                      color: Colors.transparent,
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -195,16 +198,18 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
       children: [
-        _buildAlbumCover(),
-        IconButton(
-          icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
-          onPressed: _togglePlayPause,
+        Row(
+          children: [
+            _buildAlbumCover(),
+            IconButton(
+              icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
+              onPressed: _togglePlayPause,
+            ),
+            Expanded(child: _buildWaveform()),
+          ],
         ),
-        // The waveform widget is wrapped in an Expanded to let it use available space,
-        // but its internal SingleChildScrollView will let the user scroll horizontally.
-        Expanded(child: _buildWaveform()),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8.0),
           child: Text(
