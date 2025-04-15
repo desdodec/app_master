@@ -45,6 +45,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
   final double coverSize = 60;
   // Ideal width for waveform: 250 * 4 = 1000 pixels.
   final double waveformWidth = 250 * 4;
+  final double waveformHeight = 40; // For example, 40 instead of 60.
 
   @override
   void initState() {
@@ -148,7 +149,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
         scrollDirection: Axis.horizontal,
         child: Container(
           width: waveformWidth,
-          height: coverSize,
+          height: waveformHeight,
           color: Colors.black12,
           child: Stack(
             children: [
