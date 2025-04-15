@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:flutter/foundation.dart'; // For debugPrint
+//import 'package:flutter/foundation.dart'; // For debugPrint
 import '../models/track.dart';
 
 class GlobalAudioManager {
@@ -44,7 +44,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
   bool _isPlaying = false;
   final double coverSize = 60;
   // Ideal width for waveform: 250 * 4 = 1000 pixels.
-  final double waveformWidth = 250 * 4;
+  final double waveformWidth = 250 * 6;
   final double waveformHeight = 40; // For example, 40 instead of 60.
 
   @override

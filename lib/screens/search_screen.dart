@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import '../models/track.dart';
 import '../services/database_service.dart';
 import '../widgets/audio_player_widget.dart';
-import 'package:flutter/foundation.dart'; // For debugPrint
+//import 'package:flutter/foundation.dart'; // For debugPrint
+import 'dart:io';
+//import 'package:file_selector_platform_interface/file_selector_platform_interface.dart';
+import 'package:file_selector/file_selector.dart'; // You may also import this if needed.
+import 'package:path/path.dart' as p;
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({Key? key}) : super(key: key);
@@ -35,6 +39,57 @@ class _SearchScreenState extends State<SearchScreen> {
   String _statusMessage = "";
 
   int get _totalPages => (_totalResults / _rowsPerPage).ceil();
+
+  void _handleDownload(Track track) async {
+    debugPrint("Download button pressed for track ${track.id}");
+
+    // The source file is located at the track's audioPath.
+    final String sourcePath = track.audioPath;
+    final File sourceFile = File(sourcePath);
+
+    if (!await sourceFile.exists()) {
+      debugPrint("Source file does not exist at $sourcePath");
+      return;
+    }
+
+    // Extract only the file name (e.g., "CAR103_02_Motivation.mp3") from the full source path.
+    final String fileName = p.basename(sourcePath);
+
+    // Open the save dialog with the suggestedName using the top-level getSaveLocation.
+    final FileSaveLocation? result = await getSaveLocation(
+      suggestedName: fileName,
+      acceptedTypeGroups: [
+        XTypeGroup(label: 'Audio', extensions: ['mp3']),
+      ],
+    );
+
+    if (result == null) {
+      // User canceled the dialog.
+      debugPrint("User cancelled the save dialog.");
+      return;
+    }
+
+    // Get the save path from the result.
+    final String savePath = result.path;
+
+    try {
+      // Copy the source file to the chosen save path.
+      await sourceFile.copy(savePath);
+      debugPrint("File successfully copied to: $savePath");
+    } catch (e) {
+      debugPrint("Error copying file: $e");
+    }
+  }
+
+  void _handleAddTrackToPlaylist(Track track) {
+    debugPrint("Add track to playlist pressed for track ${track.id}");
+    // TODO: Implement dialog or logic to add this track to a playlist.
+  }
+
+  void _handleAddAlbumToPlaylist(Track track) {
+    debugPrint("Add album to playlist pressed for track ${track.id}");
+    // TODO: Extract album information from the track and add album to playlist.
+  }
 
   Future<void> _performSearch() async {
     setState(() {
@@ -217,16 +272,25 @@ class _SearchScreenState extends State<SearchScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // First line: ID, title, and description.
+            // First line: display ID, Title, Description.
             Row(
               children: [
-                Text(
-                  "ID: ${track.id}",
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(width: 16),
+                // Use Expanded for proportional spacing.
                 Expanded(
                   flex: 1,
+                  child: Tooltip(
+                    message: "ID: ${track.id}",
+                    child: Text(
+                      "ID: ${track.id}",
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
                   child: Text(
                     track.title,
                     style: const TextStyle(fontWeight: FontWeight.bold),
@@ -234,20 +298,50 @@ class _SearchScreenState extends State<SearchScreen> {
                     maxLines: 1,
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 8),
                 Expanded(
-                  flex: 2,
+                  flex: 3,
                   child: Text(
                     track.description,
-                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            // Second line: AudioPlayerWidget.
-            AudioPlayerWidget(key: ValueKey(track.id), track: track),
+            // Second line: AudioPlayerWidget on the left and action buttons to its right.
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // Use Expanded so the audio widget takes the remaining space.
+                Expanded(
+                  child: AudioPlayerWidget(
+                    key: ValueKey(track.id),
+                    track: track,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Download Button.
+                IconButton(
+                  icon: const Icon(Icons.download),
+                  tooltip: 'Download',
+                  onPressed: () => _handleDownload(track),
+                ),
+                // Add Track to Playlist Button.
+                IconButton(
+                  icon: const Icon(Icons.playlist_add),
+                  tooltip: 'Add track to playlist',
+                  onPressed: () => _handleAddTrackToPlaylist(track),
+                ),
+                // Add Album to Playlist Button.
+                IconButton(
+                  icon: const Icon(Icons.album),
+                  tooltip: 'Add album to playlist',
+                  onPressed: () => _handleAddAlbumToPlaylist(track),
+                ),
+              ],
+            ),
           ],
         ),
       ),
