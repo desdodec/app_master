@@ -1,13 +1,19 @@
-import 'package:flutter/material.dart';
-import '../models/track.dart';
-import '../services/database_service.dart';
-import '../widgets/audio_player_widget.dart';
-//import 'package:flutter/foundation.dart'; // For debugPrint
-import 'dart:io';
-//import 'package:file_selector_platform_interface/file_selector_platform_interface.dart';
-import 'package:file_selector/file_selector.dart'; // You may also import this if needed.
-import 'package:path/path.dart' as p;
+// lib/screens/search_screen.dart
+// ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously
 
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:file_selector/file_selector.dart';
+import 'package:path/path.dart' as p;
+import '../models/track.dart';
+import '../models/playlist.dart';
+import '../services/database_service.dart';
+import '../services/playlist_service.dart';
+import '../widgets/audio_player_widget.dart';
+import '../widgets/playlist_sidebar.dart';
+import '../widgets/playlist_view.dart';
+
+/// Main screen that toggles between search mode and playlist mode.
 class SearchScreen extends StatefulWidget {
   const SearchScreen({Key? key}) : super(key: key);
 
@@ -16,10 +22,11 @@ class SearchScreen extends StatefulWidget {
 }
 
 class _SearchScreenState extends State<SearchScreen> {
+  // Controllers for search inputs
   final TextEditingController _mainSearchController = TextEditingController();
   final TextEditingController _filterController = TextEditingController();
 
-  // Updated filter options.
+  // Filter options
   final List<String> _filterOptions = [
     'id',
     'title',
@@ -31,79 +38,56 @@ class _SearchScreenState extends State<SearchScreen> {
   String _selectedFilter = 'id';
   String _selectedTrackType = 'all';
 
-  // Pagination state.
+  // Pagination
   int _currentPage = 0;
   int _totalResults = 0;
   final int _rowsPerPage = 10;
+
+  // Search results and status
   List<Track> _tracks = [];
-  String _statusMessage = "";
+  String _statusMessage = '';
 
-  int get _totalPages => (_totalResults / _rowsPerPage).ceil();
+  // Playlist mode state
+  Playlist? selectedPlaylist;
 
+  @override
+  void initState() {
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    _mainSearchController.dispose();
+    _filterController.dispose();
+    super.dispose();
+  }
+
+  /// Downloads the audio file to a location chosen by the user.
   void _handleDownload(Track track) async {
-    debugPrint("Download button pressed for track ${track.id}");
-
-    // The source file is located at the track's audioPath.
-    final String sourcePath = track.audioPath;
-    final File sourceFile = File(sourcePath);
-
-    if (!await sourceFile.exists()) {
-      debugPrint("Source file does not exist at $sourcePath");
-      return;
-    }
-
-    // Extract only the file name (e.g., "CAR103_02_Motivation.mp3") from the full source path.
-    final String fileName = p.basename(sourcePath);
-
-    // Open the save dialog with the suggestedName using the top-level getSaveLocation.
-    final FileSaveLocation? result = await getSaveLocation(
+    final sourceFile = File(track.audioPath);
+    if (!await sourceFile.exists()) return;
+    final fileName = p.basename(track.audioPath);
+    final location = await getSaveLocation(
       suggestedName: fileName,
       acceptedTypeGroups: [
         XTypeGroup(label: 'Audio', extensions: ['mp3']),
       ],
     );
-
-    if (result == null) {
-      // User canceled the dialog.
-      debugPrint("User cancelled the save dialog.");
-      return;
-    }
-
-    // Get the save path from the result.
-    final String savePath = result.path;
-
-    try {
-      // Copy the source file to the chosen save path.
-      await sourceFile.copy(savePath);
-      debugPrint("File successfully copied to: $savePath");
-    } catch (e) {
-      debugPrint("Error copying file: $e");
-    }
+    if (location != null) await sourceFile.copy(location.path);
   }
 
-  void _handleAddTrackToPlaylist(Track track) {
-    debugPrint("Add track to playlist pressed for track ${track.id}");
-    // TODO: Implement dialog or logic to add this track to a playlist.
-  }
-
-  void _handleAddAlbumToPlaylist(Track track) {
-    debugPrint("Add album to playlist pressed for track ${track.id}");
-    // TODO: Extract album information from the track and add album to playlist.
-  }
-
+  /// Performs the search by querying the database service.
   Future<void> _performSearch() async {
-    setState(() {
-      _statusMessage = "Searching...";
-    });
+    setState(() => _statusMessage = 'Searching...');
     try {
-      int count = await DatabaseService.searchTracksCount(
+      final count = await DatabaseService.searchTracksCount(
         mainSearchTerm: _mainSearchController.text.trim(),
         filterField: _selectedFilter,
         filterValue: _filterController.text.trim(),
         trackTypeFilter: _selectedTrackType,
       );
-
-      List<Track> results = await DatabaseService.searchTracks(
+      if (!mounted) return;
+      final results = await DatabaseService.searchTracks(
         mainSearchTerm: _mainSearchController.text.trim(),
         filterField: _selectedFilter,
         filterValue: _filterController.text.trim(),
@@ -111,19 +95,19 @@ class _SearchScreenState extends State<SearchScreen> {
         pageSize: _rowsPerPage,
         trackTypeFilter: _selectedTrackType,
       );
-
+      if (!mounted) return;
       setState(() {
         _tracks = results;
         _totalResults = count;
-        _statusMessage = results.isEmpty ? "No results found." : "";
+        _statusMessage = results.isEmpty ? 'No results found.' : '';
       });
     } catch (e) {
-      setState(() {
-        _statusMessage = "Error: $e";
-      });
+      if (!mounted) return;
+      setState(() => _statusMessage = 'Error: $e');
     }
   }
 
+  /// Clears all search inputs and resets to initial state.
   void _clearAll() {
     setState(() {
       _mainSearchController.clear();
@@ -133,36 +117,21 @@ class _SearchScreenState extends State<SearchScreen> {
       _currentPage = 0;
       _tracks = [];
       _totalResults = 0;
-      _statusMessage = "";
+      _statusMessage = '';
+      selectedPlaylist = null;
     });
   }
 
-  Widget _buildToggleButton(String label, String value) {
-    bool isSelected = _selectedTrackType == value;
-    return ElevatedButton(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: isSelected ? Colors.blue : Colors.grey,
-      ),
-      onPressed: () {
-        setState(() {
-          _selectedTrackType = value;
-          _currentPage = 0;
-        });
-        _performSearch();
-      },
-      child: Text(label),
-    );
-  }
-
-  /// Builds the search controls all on one horizontal line.
+  /// Builds the top search/filter controls.
   Widget _buildSearchControls() {
-    return SizedBox(
-      width: MediaQuery.of(context).size.width,
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
+          mainAxisSize:
+              MainAxisSize.min, // allow horizontal scrolling without overflow
           children: [
-            // Full-text search field.
             SizedBox(
               width: 200,
               child: TextField(
@@ -178,40 +147,24 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            // Filter by dropdown.
             SizedBox(
-              width: 120,
+              width: 124,
               child: DropdownButtonFormField<String>(
-                isExpanded: true,
-                value: _selectedFilter,
-                icon: const Icon(Icons.arrow_drop_down, size: 24),
-                items:
-                    _filterOptions.map((option) {
-                      return DropdownMenuItem(
-                        value: option,
-                        child: Text(option, overflow: TextOverflow.ellipsis),
-                      );
-                    }).toList(),
                 decoration: const InputDecoration(
                   labelText: 'Filter by',
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 10,
-                  ),
                   border: OutlineInputBorder(),
                 ),
-                onChanged: (val) {
-                  if (val != null) {
-                    setState(() {
-                      _selectedFilter = val;
-                    });
-                  }
+                value: _selectedFilter,
+                items:
+                    _filterOptions
+                        .map((f) => DropdownMenuItem(value: f, child: Text(f)))
+                        .toList(),
+                onChanged: (v) {
+                  if (v != null) setState(() => _selectedFilter = v);
                 },
               ),
             ),
             const SizedBox(width: 8),
-            // Filter value field.
             SizedBox(
               width: 150,
               child: TextField(
@@ -227,33 +180,38 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            // Toggle buttons.
-            _buildToggleButton('All', 'all'),
-            const SizedBox(width: 4),
-            _buildToggleButton('Instrumental', 'instrumental'),
-            const SizedBox(width: 4),
-            _buildToggleButton('Vocal', 'vocal'),
-            const SizedBox(width: 4),
-            _buildToggleButton('Solo', 'solo'),
+            ...['all', 'instrumental', 'vocal', 'solo'].map((type) {
+              final isSelected = _selectedTrackType == type;
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isSelected ? Colors.blue : Colors.grey,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _selectedTrackType = type;
+                      _currentPage = 0;
+                    });
+                    _performSearch();
+                  },
+                  child: Text(type[0].toUpperCase() + type.substring(1)),
+                ),
+              );
+            }),
             const SizedBox(width: 8),
-            // Search button.
             ElevatedButton(
               onPressed: () {
                 _currentPage = 0;
                 _performSearch();
               },
-              child: const Text("Search"),
+              child: const Text('Search'),
             ),
             const SizedBox(width: 8),
-            // Clear All button.
             ElevatedButton.icon(
               onPressed: _clearAll,
               icon: const Icon(Icons.clear),
-              label: const Text("Clear All"),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red.shade100,
-                foregroundColor: Colors.red.shade900,
-              ),
+              label: const Text('Clear All'),
             ),
           ],
         ),
@@ -261,84 +219,52 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// Builds each result row with two lines:
-  /// First line: ID, title, and description.
-  /// Second line: AudioPlayerWidget.
+  // ... rest of the code remains unchanged
+
+  /// Builds a single track result row with player and actions.
   Widget _buildResultRow(Track track) {
     return Card(
-      margin: const EdgeInsets.symmetric(vertical: 8),
+      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       child: Padding(
         padding: const EdgeInsets.all(8.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // First line: display ID, Title, Description.
             Row(
               children: [
-                // Use Expanded for proportional spacing.
                 Expanded(
-                  flex: 1,
-                  child: Tooltip(
-                    message: "ID: ${track.id}",
-                    child: Text(
-                      "ID: ${track.id}",
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                    ),
+                  child: Text(
+                    'ID: ${track.id}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  flex: 2,
                   child: Text(
                     track.title,
                     style: const TextStyle(fontWeight: FontWeight.bold),
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
                   ),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
-                  flex: 3,
-                  child: Text(
-                    track.description,
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
-                  ),
-                ),
+                Expanded(child: Text(track.description)),
               ],
             ),
             const SizedBox(height: 8),
-            // Second line: AudioPlayerWidget on the left and action buttons to its right.
             Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                // Use Expanded so the audio widget takes the remaining space.
                 Expanded(
                   child: AudioPlayerWidget(
                     key: ValueKey(track.id),
                     track: track,
                   ),
                 ),
-                const SizedBox(width: 8),
-                // Download Button.
                 IconButton(
                   icon: const Icon(Icons.download),
-                  tooltip: 'Download',
                   onPressed: () => _handleDownload(track),
                 ),
-                // Add Track to Playlist Button.
                 IconButton(
                   icon: const Icon(Icons.playlist_add),
-                  tooltip: 'Add track to playlist',
                   onPressed: () => _handleAddTrackToPlaylist(track),
-                ),
-                // Add Album to Playlist Button.
-                IconButton(
-                  icon: const Icon(Icons.album),
-                  tooltip: 'Add album to playlist',
-                  onPressed: () => _handleAddAlbumToPlaylist(track),
                 ),
               ],
             ),
@@ -348,9 +274,10 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// Builds pagination controls in the format "< [icon] Page X of Y [icon] >"
+  /// Builds pagination controls at bottom.
   Widget _buildPagination() {
-    if (_totalPages <= 1) return const SizedBox.shrink();
+    final totalPages = (_totalResults / _rowsPerPage).ceil();
+    if (totalPages <= 1) return const SizedBox.shrink();
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -366,11 +293,11 @@ class _SearchScreenState extends State<SearchScreen> {
                   }
                   : null,
         ),
-        Text("Page ${_currentPage + 1} of $_totalPages"),
+        Text('Page ${_currentPage + 1} of $totalPages'),
         IconButton(
           icon: const Icon(Icons.chevron_right),
           onPressed:
-              (_currentPage + 1) < _totalPages
+              _currentPage + 1 < totalPages
                   ? () {
                     setState(() {
                       _currentPage++;
@@ -383,37 +310,172 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Music Search')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            _buildSearchControls(),
-            const SizedBox(height: 16),
-            if (_statusMessage.isNotEmpty) Text(_statusMessage),
-            Expanded(
-              child: ListView.builder(
-                itemCount: _tracks.length,
-                itemBuilder: (context, index) {
-                  final track = _tracks[index];
-                  return _buildResultRow(track);
-                },
-              ),
-            ),
-            _buildPagination(),
-          ],
-        ),
-      ),
+  /// Shows modal for adding a track to a playlist.
+  void _handleAddTrackToPlaylist(Track track) {
+    showModalBottomSheet(
+      context: context,
+      builder: (_) => AddToPlaylistModal(track: track),
     );
   }
 
   @override
-  void dispose() {
-    _mainSearchController.dispose();
-    _filterController.dispose();
-    super.dispose();
+  Widget build(BuildContext context) {
+    final bool inPlaylistMode = selectedPlaylist != null;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Music Search'),
+        actions: [
+          if (selectedPlaylist != null)
+            IconButton(
+              icon: const Icon(Icons.search), // 🔍 back-to-search
+              tooltip: 'Back to Search',
+              onPressed: () => setState(() => selectedPlaylist = null),
+            ),
+        ],
+      ),
+      body: Row(
+        children: [
+          PlaylistSidebar(
+            onPlaylistSelected: (pl) => setState(() => selectedPlaylist = pl),
+          ),
+          const VerticalDivider(width: 1),
+          Expanded(
+            child:
+                inPlaylistMode
+                    ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: TextButton.icon(
+                            icon: const Icon(Icons.arrow_back),
+                            label: const Text('Back to Search'),
+                            onPressed:
+                                () => setState(() => selectedPlaylist = null),
+                          ),
+                        ),
+                        Expanded(
+                          child: PlaylistView(
+                            key: ValueKey('playlist_${selectedPlaylist!.id}'),
+                            playlist: selectedPlaylist!,
+                          ),
+                        ),
+                      ],
+                    )
+                    : Column(
+                      children: [
+                        _buildSearchControls(),
+                        const SizedBox(height: 16),
+                        if (_statusMessage.isNotEmpty) Text(_statusMessage),
+                        Expanded(
+                          child: ListView.builder(
+                            itemCount: _tracks.length,
+                            itemBuilder:
+                                (context, index) =>
+                                    _buildResultRow(_tracks[index]),
+                          ),
+                        ),
+                        _buildPagination(),
+                      ],
+                    ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Modal bottom sheet component to add a track to a playlist.
+class AddToPlaylistModal extends StatefulWidget {
+  final Track track;
+  const AddToPlaylistModal({Key? key, required this.track}) : super(key: key);
+
+  @override
+  State<AddToPlaylistModal> createState() => _AddToPlaylistModalState();
+}
+
+class _AddToPlaylistModalState extends State<AddToPlaylistModal> {
+  List<Playlist> playlists = [];
+  bool isCreatingNew = false;
+  final TextEditingController newPlaylistController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPlaylists();
+  }
+
+  Future<void> _loadPlaylists() async {
+    final pls = await PlaylistService.getPlaylists();
+    if (!mounted) return;
+    setState(() => playlists = pls);
+  }
+
+  Future<void> _addToPlaylist(Playlist pl) async {
+    final added = await PlaylistService.addTrackToPlaylist(pl.id, widget.track);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(added ? 'Added to ${pl.name}' : 'Already in ${pl.name}'),
+      ),
+    );
+    Navigator.pop(context);
+  }
+
+  Future<void> _createAndAdd(String name) async {
+    final pl = await PlaylistService.createPlaylist(name);
+    await _addToPlaylist(pl);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child:
+            isCreatingNew
+                ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: newPlaylistController,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        hintText: 'Playlist Name',
+                      ),
+                      onSubmitted: (v) {
+                        final name = v.trim();
+                        if (name.isNotEmpty) _createAndAdd(name);
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    ElevatedButton(
+                      onPressed: () {
+                        final name = newPlaylistController.text.trim();
+                        if (name.isNotEmpty) _createAndAdd(name);
+                      },
+                      child: const Text('Create & Add'),
+                    ),
+                  ],
+                )
+                : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.add),
+                      title: const Text('New Playlist'),
+                      onTap: () => setState(() => isCreatingNew = true),
+                    ),
+                    const Divider(),
+                    ...playlists.map(
+                      (pl) => ListTile(
+                        title: Text(pl.name),
+                        onTap: () => _addToPlaylist(pl),
+                      ),
+                    ),
+                  ],
+                ),
+      ),
+    );
   }
 }

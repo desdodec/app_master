@@ -21,8 +21,9 @@ class DatabaseService {
     if (!await File(dbPath).exists()) {
       throw Exception('Database file not found at $dbPath');
     }
-    // Open the database in read-only mode.
-    return await openDatabase(dbPath, readOnly: true);
+    debugPrint("Opening database from $dbPath in read-write mode.");
+    // Remove 'readOnly: true' to allow updates:
+    return await openDatabase(dbPath, readOnly: false);
   }
 
   /// Searches for tracks using full-text search and filtering options.
