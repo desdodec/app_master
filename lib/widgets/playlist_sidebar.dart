@@ -96,7 +96,7 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
   Future<void> _createNewPlaylist(String name) async {
     try {
       await PlaylistService.createPlaylist(name);
-      await fetchPlaylists();
+      await fetchPlaylists(); // Refresh the playlist list after creation.
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,

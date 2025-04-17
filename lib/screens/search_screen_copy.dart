@@ -25,7 +25,6 @@ class _SearchScreenState extends State<SearchScreen> {
   // Controllers for search inputs
   final TextEditingController _mainSearchController = TextEditingController();
   final TextEditingController _filterController = TextEditingController();
-  int _sidebarRefreshCounter = 0; // ← add it here, as a field
 
   // Filter options
   final List<String> _filterOptions = [
@@ -318,12 +317,7 @@ class _SearchScreenState extends State<SearchScreen> {
       builder:
           (_) => AddToPlaylistModal(
             track: track,
-            onPlaylistSelected: (pl) {
-              setState(() {
-                selectedPlaylist = pl;
-                _sidebarRefreshCounter++; // ← bump counter to trigger reload
-              });
-            },
+            onPlaylistSelected: (pl) => setState(() => selectedPlaylist = pl),
           ),
     );
   }
@@ -346,12 +340,7 @@ class _SearchScreenState extends State<SearchScreen> {
       body: Row(
         children: [
           PlaylistSidebar(
-            key: ValueKey(
-              _sidebarRefreshCounter,
-            ), // ← rebuild widget when counter changes
-            onPlaylistSelected: (pl) {
-              setState(() => selectedPlaylist = pl);
-            },
+            onPlaylistSelected: (pl) => setState(() => selectedPlaylist = pl),
           ),
           const VerticalDivider(width: 1),
           Expanded(
@@ -403,7 +392,8 @@ class _SearchScreenState extends State<SearchScreen> {
 /// Modal bottom sheet component to add a track to a playlist.
 class AddToPlaylistModal extends StatefulWidget {
   final Track track;
-  final void Function(Playlist?) onPlaylistSelected; // ← add this
+  final void Function(Playlist?) onPlaylistSelected; // ← add this line
+
   const AddToPlaylistModal({
     Key? key,
     required this.track,
@@ -439,7 +429,8 @@ class _AddToPlaylistModalState extends State<AddToPlaylistModal> {
         content: Text(added ? 'Added to ${pl.name}' : 'Already in ${pl.name}'),
       ),
     );
-    widget.onPlaylistSelected(pl);
+
+    widget.onPlaylistSelected(pl); // ← notify SearchScreen to refresh sidebar
     Navigator.pop(context);
   }
 
