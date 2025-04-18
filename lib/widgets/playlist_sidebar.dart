@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../models/playlist.dart';
 import '../services/playlist_service.dart';
 
+enum _SortOption { name, dateCreated }
+
 /// Sidebar that displays and manages playlists.
 class PlaylistSidebar extends StatefulWidget {
   /// Callback when a playlist is selected (or null to return to search).
@@ -18,6 +20,7 @@ class PlaylistSidebar extends StatefulWidget {
 }
 
 class _PlaylistSidebarState extends State<PlaylistSidebar> {
+  _SortOption _sortOption = _SortOption.name;
   List<Playlist> playlists = [];
   int? editingPlaylistId;
   final TextEditingController editingController = TextEditingController();
@@ -36,10 +39,22 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
       if (!mounted) return;
       setState(() {
         playlists = pls;
+        _sortPlaylists(); // ← NEW
       });
     } catch (e) {
       debugPrint('Error loading playlists: $e');
     }
+  }
+
+  void _sortPlaylists() {
+    playlists.sort((a, b) {
+      switch (_sortOption) {
+        case _SortOption.name:
+          return a.name.compareTo(b.name);
+        case _SortOption.dateCreated:
+          return a.createdAt.compareTo(b.createdAt);
+      }
+    });
   }
 
   Future<void> _onReorder(int oldIndex, int newIndex) async {
@@ -114,6 +129,10 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
     final isEditing = editingPlaylistId == pl.id;
 
     return ListTile(
+      leading: ReorderableDragStartListener(
+        index: index,
+        child: const Icon(Icons.drag_handle),
+      ),
       key: ValueKey(pl.id),
       title:
           isEditing
@@ -165,8 +184,33 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
       width: 250,
       child: Column(
         children: [
+          // ← NEW SORT CONTROL
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: DropdownButton<_SortOption>(
+              value: _sortOption,
+              isExpanded: true,
+              onChanged: (opt) {
+                if (opt != null) {
+                  setState(() => _sortOption = opt);
+                  _sortPlaylists();
+                }
+              },
+              items: const [
+                DropdownMenuItem(
+                  value: _SortOption.name,
+                  child: Text('Sort by Name'),
+                ),
+                DropdownMenuItem(
+                  value: _SortOption.dateCreated,
+                  child: Text('Sort by Date Created'),
+                ),
+              ],
+            ),
+          ),
           Expanded(
             child: ReorderableListView(
+              buildDefaultDragHandles: false, // ← add this
               onReorder: _onReorder,
               children: [
                 for (int i = 0; i < playlists.length; i++)
@@ -174,6 +218,7 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
               ],
             ),
           ),
+
           const Divider(),
           isCreatingNew
               // Inline creation row
