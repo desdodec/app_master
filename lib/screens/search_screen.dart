@@ -311,19 +311,34 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// Shows modal for adding a track to a playlist.
+  /// Shows a full‑height, scrollable modal for adding a track to a playlist,
+  /// but does NOT select the playlist (so you stay in search mode).
   void _handleAddTrackToPlaylist(Track track) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       builder:
-          (_) => AddToPlaylistModal(
-            track: track,
-            onPlaylistSelected: (pl) {
-              setState(() {
-                selectedPlaylist = pl;
-                _sidebarRefreshCounter++; // ← bump counter to trigger reload
-              });
-            },
+          (_) => Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom,
+            ),
+            child: SingleChildScrollView(
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: AddToPlaylistModal(
+                    track: track,
+                    onPlaylistSelected: (_) {
+                      // Only bump the sidebar key to reload playlists,
+                      // but don’t set selectedPlaylist.
+                      setState(() {
+                        _sidebarRefreshCounter++;
+                      });
+                    },
+                  ),
+                ),
+              ),
+            ),
           ),
     );
   }
@@ -453,49 +468,51 @@ class _AddToPlaylistModalState extends State<AddToPlaylistModal> {
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child:
-            isCreatingNew
-                ? Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: newPlaylistController,
-                      autofocus: true,
-                      decoration: const InputDecoration(
-                        hintText: 'Playlist Name',
+        child: SingleChildScrollView(
+          child:
+              isCreatingNew
+                  ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: newPlaylistController,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          hintText: 'Playlist Name',
+                        ),
+                        onSubmitted: (v) {
+                          final name = v.trim();
+                          if (name.isNotEmpty) _createAndAdd(name);
+                        },
                       ),
-                      onSubmitted: (v) {
-                        final name = v.trim();
-                        if (name.isNotEmpty) _createAndAdd(name);
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    ElevatedButton(
-                      onPressed: () {
-                        final name = newPlaylistController.text.trim();
-                        if (name.isNotEmpty) _createAndAdd(name);
-                      },
-                      child: const Text('Create & Add'),
-                    ),
-                  ],
-                )
-                : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    ListTile(
-                      leading: const Icon(Icons.add),
-                      title: const Text('New Playlist'),
-                      onTap: () => setState(() => isCreatingNew = true),
-                    ),
-                    const Divider(),
-                    ...playlists.map(
-                      (pl) => ListTile(
-                        title: Text(pl.name),
-                        onTap: () => _addToPlaylist(pl),
+                      const SizedBox(height: 8),
+                      ElevatedButton(
+                        onPressed: () {
+                          final name = newPlaylistController.text.trim();
+                          if (name.isNotEmpty) _createAndAdd(name);
+                        },
+                        child: const Text('Create & Add'),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  )
+                  : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.add),
+                        title: const Text('New Playlist'),
+                        onTap: () => setState(() => isCreatingNew = true),
+                      ),
+                      const Divider(),
+                      ...playlists.map(
+                        (pl) => ListTile(
+                          title: Text(pl.name),
+                          onTap: () => _addToPlaylist(pl),
+                        ),
+                      ),
+                    ],
+                  ),
+        ),
       ),
     );
   }

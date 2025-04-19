@@ -5,11 +5,11 @@ import 'package:flutter/material.dart';
 import '../models/playlist.dart';
 import '../services/playlist_service.dart';
 
+/// Sidebar that displays, searches, sorts, and manages playlists.
 enum _SortOption { name, dateCreated }
 
-/// Sidebar that displays and manages playlists.
 class PlaylistSidebar extends StatefulWidget {
-  /// Callback when a playlist is selected (or null to return to search).
+  /// Called when the user taps a playlist (or back to search via null).
   final void Function(Playlist?) onPlaylistSelected;
 
   const PlaylistSidebar({Key? key, required this.onPlaylistSelected})
@@ -20,12 +20,11 @@ class PlaylistSidebar extends StatefulWidget {
 }
 
 class _PlaylistSidebarState extends State<PlaylistSidebar> {
-  final TextEditingController _searchController = TextEditingController();
+  // --- State fields ---
   String _searchQuery = '';
-
   _SortOption _sortOption = _SortOption.name;
 
-  List<Playlist> _allPlaylists = [];
+  List<Playlist> playlists = [];
   List<Playlist> _displayedPlaylists = [];
 
   int? editingPlaylistId;
@@ -34,28 +33,35 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
   bool isCreatingNew = false;
   final TextEditingController newPlaylistController = TextEditingController();
 
+  // --- Lifecycle ---
   @override
   void initState() {
     super.initState();
-    _loadPlaylists();
+    _fetchPlaylists();
   }
 
-  Future<void> _loadPlaylists() async {
+  @override
+  void dispose() {
+    editingController.dispose();
+    newPlaylistController.dispose();
+    super.dispose();
+  }
+
+  // --- Data loading & refresh ---
+  Future<void> _fetchPlaylists() async {
     try {
       final pls = await PlaylistService.getPlaylists();
       if (!mounted) return;
-      setState(() {
-        _allPlaylists = pls;
-        _applySortAndFilter();
-      });
+      playlists = pls;
+      _refreshDisplayList();
     } catch (e) {
       debugPrint('Error loading playlists: $e');
     }
   }
 
-  void _applySortAndFilter() {
-    // 1) sort
-    _allPlaylists.sort((a, b) {
+  void _refreshDisplayList() {
+    // 1) sort master list based on selected option
+    playlists.sort((a, b) {
       switch (_sortOption) {
         case _SortOption.name:
           return a.name.compareTo(b.name);
@@ -63,48 +69,40 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
           return a.createdAt.compareTo(b.createdAt);
       }
     });
-    // 2) filter
+
+    // 2) filter into displayed list
     if (_searchQuery.isEmpty) {
-      _displayedPlaylists = List.from(_allPlaylists);
+      _displayedPlaylists = List.from(playlists);
     } else {
       _displayedPlaylists =
-          _allPlaylists
+          playlists
               .where(
                 (pl) =>
                     pl.name.toLowerCase().contains(_searchQuery.toLowerCase()),
               )
               .toList();
     }
+
+    setState(() {});
   }
 
+  // --- Search & Sort callbacks ---
   void _onSearchChanged(String query) {
-    setState(() {
-      _searchQuery = query;
-      _applySortAndFilter();
-    });
+    _searchQuery = query;
+    _refreshDisplayList();
   }
 
-  void _onSortChanged(_SortOption? option) {
-    if (option == null) return;
-    setState(() {
-      _sortOption = option;
-      _applySortAndFilter();
-    });
+  void _onSortChanged(_SortOption? opt) {
+    if (opt != null) {
+      _sortOption = opt;
+      _refreshDisplayList();
+    }
   }
 
-  Future<void> _onReorder(int oldIndex, int newIndex) async {
-    // only allow drag when not filtered
-    if (_searchQuery.isNotEmpty) return;
-    if (newIndex > oldIndex) newIndex -= 1;
-    final item = _allPlaylists.removeAt(oldIndex);
-    _allPlaylists.insert(newIndex, item);
-    setState(() => _applySortAndFilter());
-    await PlaylistService.updatePlaylistOrdering(_allPlaylists);
-  }
-
+  // --- CRUD operations ---
   Future<void> _renamePlaylist(int playlistId, String newName) async {
     await PlaylistService.renamePlaylist(playlistId, newName);
-    await _loadPlaylists();
+    await _fetchPlaylists();
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
@@ -116,7 +114,7 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
         await showDialog<bool>(
           context: context,
           builder:
-              (context) => AlertDialog(
+              (_) => AlertDialog(
                 title: const Text('Delete Playlist'),
                 content: const Text(
                   'Are you sure you want to delete this playlist?',
@@ -134,52 +132,40 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
               ),
         ) ??
         false;
-    if (confirmed) {
-      await PlaylistService.deletePlaylist(playlistId);
-      await _loadPlaylists();
-      widget.onPlaylistSelected(null);
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Playlist deleted')));
-    }
+    if (!confirmed) return;
+
+    await PlaylistService.deletePlaylist(playlistId);
+    widget.onPlaylistSelected(null);
+    await _fetchPlaylists();
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Playlist deleted')));
   }
 
   Future<void> _createNewPlaylist(String name) async {
-    try {
-      await PlaylistService.createPlaylist(name);
-      await _loadPlaylists();
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Playlist created')));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error creating playlist: $e')));
-    }
+    await PlaylistService.createPlaylist(name);
+    await _fetchPlaylists();
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Playlist created')));
   }
 
-  Widget _buildPlaylistItem(BuildContext context, int index) {
-    final pl = _displayedPlaylists[index];
+  // --- UI builders ---
+  Widget _buildPlaylistItem(Playlist pl) {
     final isEditing = editingPlaylistId == pl.id;
-
     return ListTile(
       key: ValueKey(pl.id),
-      leading: ReorderableDragStartListener(
-        index: index,
-        child: const Icon(Icons.drag_handle),
-      ),
       title:
           isEditing
               ? TextField(
                 controller: editingController..text = pl.name,
                 autofocus: true,
-                onSubmitted: (value) {
-                  final newName = value.trim();
-                  if (newName.isNotEmpty && newName != pl.name) {
-                    _renamePlaylist(pl.id, newName);
+                onSubmitted: (val) {
+                  final trimmed = val.trim();
+                  if (trimmed.isNotEmpty && trimmed != pl.name) {
+                    _renamePlaylist(pl.id, trimmed);
                   }
                   setState(() => editingPlaylistId = null);
                 },
@@ -220,111 +206,91 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
       width: 250,
       child: Column(
         children: [
-          // ─── Search & Sort ───────────────────────────────────────
+          // --- 1) Search field ---
           Padding(
             padding: const EdgeInsets.all(8.0),
-            child: Row(
-              children: [
-                // Search field
-                Expanded(
-                  child: TextField(
-                    controller: _searchController,
-                    decoration: const InputDecoration(
-                      labelText: 'Search Playlists',
-                      prefixIcon: Icon(Icons.search),
-                      border: OutlineInputBorder(),
-                    ),
-                    onChanged: _onSearchChanged,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Sort dropdown
-                DropdownButton<_SortOption>(
-                  value: _sortOption,
-                  items: const [
-                    DropdownMenuItem(
-                      value: _SortOption.name,
-                      child: Text('Name'),
-                    ),
-                    DropdownMenuItem(
-                      value: _SortOption.dateCreated,
-                      child: Text('Date Created'),
-                    ),
-                  ],
-                  onChanged: _onSortChanged,
-                ),
-              ],
+            child: TextField(
+              decoration: const InputDecoration(
+                labelText: 'Search Playlists',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+              ),
+              onChanged: _onSearchChanged,
             ),
           ),
 
-          // ─── Playlist List ───────────────────────────────────────
-          Expanded(
-            child: ReorderableListView(
-              buildDefaultDragHandles: false,
-              onReorder:
-                  _searchQuery.isEmpty
-                      ? _onReorder
-                      : (oldIdx, newIdx) {
-                        /*noop*/
-                      },
-              children: [
-                for (int i = 0; i < _displayedPlaylists.length; i++)
-                  _buildPlaylistItem(context, i),
+          // --- 2) Sort dropdown ---
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: DropdownButtonFormField<_SortOption>(
+              decoration: const InputDecoration(
+                labelText: 'Sort by',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              value: _sortOption,
+              items: const [
+                DropdownMenuItem(value: _SortOption.name, child: Text('Name')),
+                DropdownMenuItem(
+                  value: _SortOption.dateCreated,
+                  child: Text('Date Created'),
+                ),
               ],
+              onChanged: _onSortChanged,
             ),
           ),
 
           const Divider(),
 
-          // ─── New Playlist ────────────────────────────────────────
-          isCreatingNew
-              ? Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: newPlaylistController,
-                        autofocus: true,
-                        decoration: const InputDecoration(
-                          hintText: 'New Playlist',
-                        ),
+          // --- 3) Playlist list ---
+          Expanded(
+            child: ListView(
+              children: _displayedPlaylists.map(_buildPlaylistItem).toList(),
+            ),
+          ),
+
+          const Divider(),
+
+          // --- 4) Inline “new playlist” row or button ---
+          if (isCreatingNew)
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: newPlaylistController,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        hintText: 'New Playlist',
                       ),
                     ),
-                    ElevatedButton(
-                      onPressed: () {
-                        final name = newPlaylistController.text.trim();
-                        if (name.isNotEmpty) {
-                          _createNewPlaylist(name);
-                        }
-                        setState(() {
-                          isCreatingNew = false;
-                          newPlaylistController.clear();
-                        });
-                      },
-                      child: const Text('Create'),
-                    ),
-                  ],
-                ),
-              )
-              : SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () => setState(() => isCreatingNew = true),
-                  icon: const Icon(Icons.add),
-                  label: const Text('New Playlist'),
-                ),
+                  ),
+                  ElevatedButton(
+                    onPressed: () {
+                      final name = newPlaylistController.text.trim();
+                      if (name.isNotEmpty) _createNewPlaylist(name);
+                      setState(() {
+                        isCreatingNew = false;
+                        newPlaylistController.clear();
+                      });
+                    },
+                    child: const Text('Create'),
+                  ),
+                ],
               ),
+            )
+          else
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => setState(() => isCreatingNew = true),
+                icon: const Icon(Icons.add),
+                label: const Text('New Playlist'),
+              ),
+            ),
         ],
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    editingController.dispose();
-    newPlaylistController.dispose();
-    super.dispose();
   }
 }

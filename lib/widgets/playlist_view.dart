@@ -3,8 +3,9 @@
 
 import 'package:flutter/material.dart';
 import '../models/playlist.dart';
-import '../services/playlist_service.dart';
 import '../models/track.dart';
+import '../services/playlist_service.dart';
+import '../services/database_service.dart';
 import '../widgets/audio_player_widget.dart';
 
 class PlaylistView extends StatefulWidget {
@@ -17,36 +18,92 @@ class PlaylistView extends StatefulWidget {
 }
 
 class _PlaylistViewState extends State<PlaylistView> {
-  List<PlaylistTrack> tracks = [];
+  List<PlaylistTrack> _playlistTracks = [];
+  List<Track> _displayTracks = [];
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    fetchTracks();
+    _loadPlaylist();
   }
 
-  Future<void> fetchTracks() async {
-    var ts = await PlaylistService.getPlaylistTracks(widget.playlist.id);
-    if (!mounted) return;
-    setState(() {
-      tracks = ts;
-    });
+  Future<void> _loadPlaylist() async {
+    try {
+      final pts = await PlaylistService.getPlaylistTracks(widget.playlist.id);
+      // Load full Track metadata for each playlist track
+      final tracks = await Future.wait(
+        pts.map((pt) async {
+          final results = await DatabaseService.searchTracks(
+            mainSearchTerm: '',
+            filterField: 'id',
+            filterValue: pt.trackId,
+            page: 0,
+            pageSize: 1,
+            trackTypeFilter: 'all',
+          );
+          if (results.isNotEmpty) return results.first;
+          // Fallback to dummy if DB lookup fails
+          return Track(
+            id: pt.trackId,
+            favourited: 0,
+            publisher: '',
+            library: pt.library,
+            cdTitle: pt.cdTitle,
+            composer: '',
+            title: pt.title,
+            description: '',
+            version: '',
+            filename: pt.filename,
+            releasedAt: 0,
+            number: 0,
+            cdDescription: '',
+            duration: pt.duration,
+            bpm: 0,
+            priority: 0,
+            keywords: '',
+            isChild: 0,
+            parent: 0,
+            mood: 0,
+            solo: 0,
+            vocal: 0,
+            featured: 0,
+            lyric: '',
+          );
+        }),
+      );
+      if (!mounted) return;
+      setState(() {
+        _playlistTracks = pts;
+        _displayTracks = tracks;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      debugPrint('Error loading playlist tracks: $e');
+    }
   }
 
   Future<void> _onReorder(int oldIndex, int newIndex) async {
     if (newIndex > oldIndex) newIndex -= 1;
-    final item = tracks.removeAt(oldIndex);
-    tracks.insert(newIndex, item);
+    final movedTrack = _playlistTracks.removeAt(oldIndex);
+    final movedDisplay = _displayTracks.removeAt(oldIndex);
+    _playlistTracks.insert(newIndex, movedTrack);
+    _displayTracks.insert(newIndex, movedDisplay);
     setState(() {});
-    await PlaylistService.updateTrackOrdering(widget.playlist.id, tracks);
+    await PlaylistService.updateTrackOrdering(
+      widget.playlist.id,
+      _playlistTracks,
+    );
   }
 
-  Future<void> _deleteTrack(PlaylistTrack track) async {
-    bool confirmed =
+  Future<void> _deleteTrack(PlaylistTrack pt) async {
+    final confirmed =
         await showDialog<bool>(
           context: context,
           builder:
-              (context) => AlertDialog(
+              (_) => AlertDialog(
                 title: const Text('Remove Track'),
                 content: const Text(
                   'Are you sure you want to remove this track from the playlist?',
@@ -64,79 +121,28 @@ class _PlaylistViewState extends State<PlaylistView> {
               ),
         ) ??
         false;
-    if (confirmed) {
-      await PlaylistService.removeTrackFromPlaylist(
-        widget.playlist.id,
-        track.trackId,
-      );
-      await fetchTracks();
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Track removed')));
-    }
-  }
+    if (!confirmed) return;
 
-  Widget _buildTrackItem(BuildContext context, int index) {
-    final trackItem = tracks[index];
-    // Create a dummy Track instance for the AudioPlayerWidget using available track info.
-    final Track dummyTrack = Track(
-      id: trackItem.trackId,
-      favourited: 0,
-      publisher: '',
-      library: trackItem.library,
-      cdTitle: trackItem.cdTitle,
-      composer: '',
-      title: trackItem.title,
-      description: '',
-      version: '',
-      filename: trackItem.filename,
-      releasedAt: 0,
-      number: 0,
-      cdDescription: '',
-      duration: trackItem.duration,
-      bpm: 0,
-      priority: 0,
-      keywords: '',
-      isChild: 0,
-      parent: 0,
-      mood: 0,
-      solo: 0,
-      vocal: 0,
-      featured: 0,
-      lyric: '',
+    await PlaylistService.removeTrackFromPlaylist(
+      widget.playlist.id,
+      pt.trackId,
     );
-
-    return Column(
-      key: ValueKey(trackItem.id),
-      children: [
-        ListTile(
-          title: Text(trackItem.title),
-          subtitle: Text('Library: ${trackItem.library}'),
-          trailing: IconButton(
-            icon: const Icon(Icons.remove_circle_outline),
-            tooltip: 'Remove Track',
-            onPressed: () => _deleteTrack(trackItem),
-          ),
-          contentPadding: const EdgeInsets.symmetric(
-            vertical: 8.0,
-            horizontal: 16.0,
-          ),
-        ),
-        AudioPlayerWidget(
-          key: ValueKey('audio_${trackItem.id}'),
-          track: dummyTrack,
-        ),
-      ],
-    );
+    await _loadPlaylist();
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Track removed')));
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Playlist header.
         Padding(
           padding: const EdgeInsets.all(16.0),
           child: Text(
@@ -148,8 +154,64 @@ class _PlaylistViewState extends State<PlaylistView> {
           child: ReorderableListView(
             onReorder: _onReorder,
             children: [
-              for (int i = 0; i < tracks.length; i++)
-                _buildTrackItem(context, i),
+              for (var i = 0; i < _playlistTracks.length; i++)
+                Card(
+                  key: ValueKey(_playlistTracks[i].id),
+                  margin: const EdgeInsets.symmetric(
+                    vertical: 8,
+                    horizontal: 12,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // ID | Title | Description row
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'ID: ${_displayTracks[i].id}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _displayTracks[i].title,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(_displayTracks[i].description),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        // Audio player + remove button
+                        Row(
+                          children: [
+                            Expanded(
+                              child: AudioPlayerWidget(
+                                key: ValueKey('audio_${_playlistTracks[i].id}'),
+                                track: _displayTracks[i],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.remove_circle_outline),
+                              onPressed: () => _deleteTrack(_playlistTracks[i]),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
