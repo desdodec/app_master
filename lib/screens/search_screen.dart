@@ -63,6 +63,20 @@ class _SearchScreenState extends State<SearchScreen> {
     super.dispose();
   }
 
+  /// Reveal the given file in Finder (macOS) or Explorer (Windows).
+  Future<void> _revealInFolder(String filePath) async {
+    try {
+      if (Platform.isMacOS) {
+        await Process.run('open', ['-R', filePath]);
+      } else if (Platform.isWindows) {
+        final winPath = filePath.replaceAll('/', r'\\');
+        await Process.run('explorer.exe', ['/select,$winPath']);
+      }
+    } catch (e) {
+      debugPrint('Failed to reveal $filePath: $e');
+    }
+  }
+
   /// Downloads the audio file to a location chosen by the user.
   void _handleDownload(Track track) async {
     final sourceFile = File(track.audioPath);
@@ -261,11 +275,18 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.download),
+                  tooltip: 'Download',
                   onPressed: () => _handleDownload(track),
                 ),
                 IconButton(
                   icon: const Icon(Icons.playlist_add),
+                  tooltip: 'Add to playlist',
                   onPressed: () => _handleAddTrackToPlaylist(track),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.folder_open),
+                  tooltip: 'Reveal in folder',
+                  onPressed: () => _revealInFolder(track.audioPath),
                 ),
               ],
             ),

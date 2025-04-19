@@ -1,6 +1,7 @@
 // lib/widgets/playlist_view.dart
 // ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously
 
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models/playlist.dart';
 import '../models/track.dart';
@@ -8,9 +9,9 @@ import '../services/playlist_service.dart';
 import '../services/database_service.dart';
 import '../widgets/audio_player_widget.dart';
 
+/// View for a single playlist, showing ID, title, description, audio controls, and file reveal.
 class PlaylistView extends StatefulWidget {
   final Playlist playlist;
-
   const PlaylistView({Key? key, required this.playlist}) : super(key: key);
 
   @override
@@ -28,10 +29,10 @@ class _PlaylistViewState extends State<PlaylistView> {
     _loadPlaylist();
   }
 
+  /// Loads playlist items and their full Track metadata.
   Future<void> _loadPlaylist() async {
     try {
       final pts = await PlaylistService.getPlaylistTracks(widget.playlist.id);
-      // Load full Track metadata for each playlist track
       final tracks = await Future.wait(
         pts.map((pt) async {
           final results = await DatabaseService.searchTracks(
@@ -43,7 +44,6 @@ class _PlaylistViewState extends State<PlaylistView> {
             trackTypeFilter: 'all',
           );
           if (results.isNotEmpty) return results.first;
-          // Fallback to dummy if DB lookup fails
           return Track(
             id: pt.trackId,
             favourited: 0,
@@ -81,16 +81,41 @@ class _PlaylistViewState extends State<PlaylistView> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      debugPrint('Error loading playlist tracks: $e');
+      debugPrint('Error loading playlist: $e');
     }
   }
 
+  /// Reveals the specified audio file in Finder (macOS) or Explorer (Windows).
+  Future<void> _revealInFolder(String filePath) async {
+    final absPath = File(filePath).absolute.path;
+    try {
+      if (Platform.isMacOS) {
+        // Finder: reveal and select
+        await Process.run('open', ['-R', absPath]);
+      } else if (Platform.isWindows) {
+        // Explorer: open new window and select the file
+        final winPath = Uri.file(absPath).toFilePath(windows: true);
+        await Process.run('cmd', [
+          '/C',
+          'start',
+          '',
+          'explorer',
+          '/select,',
+          winPath,
+        ]);
+      }
+    } catch (e) {
+      debugPrint('Failed to reveal $absPath: $e');
+    }
+  }
+
+  /// Handles reordering of tracks within the playlist.
   Future<void> _onReorder(int oldIndex, int newIndex) async {
     if (newIndex > oldIndex) newIndex -= 1;
-    final movedTrack = _playlistTracks.removeAt(oldIndex);
-    final movedDisplay = _displayTracks.removeAt(oldIndex);
-    _playlistTracks.insert(newIndex, movedTrack);
-    _displayTracks.insert(newIndex, movedDisplay);
+    final movedPt = _playlistTracks.removeAt(oldIndex);
+    final movedTr = _displayTracks.removeAt(oldIndex);
+    _playlistTracks.insert(newIndex, movedPt);
+    _displayTracks.insert(newIndex, movedTr);
     setState(() {});
     await PlaylistService.updateTrackOrdering(
       widget.playlist.id,
@@ -98,6 +123,7 @@ class _PlaylistViewState extends State<PlaylistView> {
     );
   }
 
+  /// Prompts and removes a track from the playlist.
   Future<void> _deleteTrack(PlaylistTrack pt) async {
     final confirmed =
         await showDialog<bool>(
@@ -122,16 +148,73 @@ class _PlaylistViewState extends State<PlaylistView> {
         ) ??
         false;
     if (!confirmed) return;
-
     await PlaylistService.removeTrackFromPlaylist(
       widget.playlist.id,
       pt.trackId,
     );
-    await _loadPlaylist();
+    _loadPlaylist();
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('Track removed')));
+  }
+
+  /// Builds a card for each track in the playlist.
+  Widget _buildTrackItem(BuildContext context, int index) {
+    final pt = _playlistTracks[index];
+    final track = _displayTracks[index];
+    return Card(
+      key: ValueKey(pt.id),
+      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'ID: ${track.id}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    track.title,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: Text(track.description)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: AudioPlayerWidget(
+                    key: ValueKey('audio_${pt.id}'),
+                    track: track,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.remove_circle_outline),
+                  tooltip: 'Remove from playlist',
+                  onPressed: () => _deleteTrack(pt),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.folder_open),
+                  tooltip: 'Reveal in folder',
+                  onPressed: () => _revealInFolder(track.audioPath),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -139,7 +222,6 @@ class _PlaylistViewState extends State<PlaylistView> {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -155,63 +237,7 @@ class _PlaylistViewState extends State<PlaylistView> {
             onReorder: _onReorder,
             children: [
               for (var i = 0; i < _playlistTracks.length; i++)
-                Card(
-                  key: ValueKey(_playlistTracks[i].id),
-                  margin: const EdgeInsets.symmetric(
-                    vertical: 8,
-                    horizontal: 12,
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // ID | Title | Description row
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                'ID: ${_displayTracks[i].id}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _displayTracks[i].title,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(_displayTracks[i].description),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        // Audio player + remove button
-                        Row(
-                          children: [
-                            Expanded(
-                              child: AudioPlayerWidget(
-                                key: ValueKey('audio_${_playlistTracks[i].id}'),
-                                track: _displayTracks[i],
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.remove_circle_outline),
-                              onPressed: () => _deleteTrack(_playlistTracks[i]),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                _buildTrackItem(context, i),
             ],
           ),
         ),
