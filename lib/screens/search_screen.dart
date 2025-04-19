@@ -35,6 +35,7 @@ class _SearchScreenState extends State<SearchScreen> {
     'cd_title',
     'library',
     'lyric',
+    'bpm',
   ];
   String _selectedFilter = 'id';
   String _selectedTrackType = 'all';
