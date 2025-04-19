@@ -1,9 +1,15 @@
 // lib/widgets/playlist_sidebar.dart
 // ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously
 
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
+import 'package:archive/archive_io.dart';
+
 import '../models/playlist.dart';
+import '../models/track.dart';
 import '../services/playlist_service.dart';
+import 'package:file_selector/file_selector.dart';
 
 /// Sidebar that displays, searches, sorts, and manages playlists.
 enum _SortOption { name, dateCreated }
@@ -20,7 +26,6 @@ class PlaylistSidebar extends StatefulWidget {
 }
 
 class _PlaylistSidebarState extends State<PlaylistSidebar> {
-  // --- State fields ---
   String _searchQuery = '';
   _SortOption _sortOption = _SortOption.name;
 
@@ -33,34 +38,20 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
   bool isCreatingNew = false;
   final TextEditingController newPlaylistController = TextEditingController();
 
-  // --- Lifecycle ---
   @override
   void initState() {
     super.initState();
     _fetchPlaylists();
   }
 
-  @override
-  void dispose() {
-    editingController.dispose();
-    newPlaylistController.dispose();
-    super.dispose();
-  }
-
-  // --- Data loading & refresh ---
   Future<void> _fetchPlaylists() async {
-    try {
-      final pls = await PlaylistService.getPlaylists();
-      if (!mounted) return;
-      playlists = pls;
-      _refreshDisplayList();
-    } catch (e) {
-      debugPrint('Error loading playlists: $e');
-    }
+    final pls = await PlaylistService.getPlaylists();
+    if (!mounted) return;
+    playlists = pls;
+    _refreshDisplayList();
   }
 
   void _refreshDisplayList() {
-    // 1) sort master list based on selected option
     playlists.sort((a, b) {
       switch (_sortOption) {
         case _SortOption.name:
@@ -69,8 +60,6 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
           return a.createdAt.compareTo(b.createdAt);
       }
     });
-
-    // 2) filter into displayed list
     if (_searchQuery.isEmpty) {
       _displayedPlaylists = List.from(playlists);
     } else {
@@ -82,34 +71,15 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
               )
               .toList();
     }
-
     setState(() {});
   }
 
-  // --- Search & Sort callbacks ---
-  void _onSearchChanged(String query) {
-    _searchQuery = query;
-    _refreshDisplayList();
-  }
-
-  void _onSortChanged(_SortOption? opt) {
-    if (opt != null) {
-      _sortOption = opt;
-      _refreshDisplayList();
-    }
-  }
-
-  // --- CRUD operations ---
-  Future<void> _renamePlaylist(int playlistId, String newName) async {
-    await PlaylistService.renamePlaylist(playlistId, newName);
+  Future<void> _renamePlaylist(int id, String newName) async {
+    await PlaylistService.renamePlaylist(id, newName);
     await _fetchPlaylists();
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Playlist renamed')));
   }
 
-  Future<void> _deletePlaylist(int playlistId) async {
+  Future<void> _deletePlaylist(int id) async {
     final confirmed =
         await showDialog<bool>(
           context: context,
@@ -132,28 +102,87 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
               ),
         ) ??
         false;
-    if (!confirmed) return;
 
-    await PlaylistService.deletePlaylist(playlistId);
+    if (!confirmed) {
+      return;
+    }
+    await PlaylistService.deletePlaylist(id);
     widget.onPlaylistSelected(null);
     await _fetchPlaylists();
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Playlist deleted')));
   }
 
-  Future<void> _createNewPlaylist(String name) async {
-    await PlaylistService.createPlaylist(name);
-    await _fetchPlaylists();
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Playlist created')));
+  /// Prompts the user to save a ZIP of all audio files in the playlist.
+  Future<void> _downloadPlaylist(Playlist pl) async {
+    // 1) Fetch the playlist entries
+    final pts = await PlaylistService.getPlaylistTracks(pl.id);
+
+    // 2) Create the ZIP in a temporary file
+    final tempDir = Directory.systemTemp;
+    final tempZip = File(p.join(tempDir.path, '${pl.name}.zip'));
+    final encoder = ZipFileEncoder()..create(tempZip.path);
+
+    // 3) Add each existing audio file to the zip
+    for (var pt in pts) {
+      final t = Track(
+        id: pt.trackId,
+        favourited: 0,
+        publisher: '',
+        library: pt.library,
+        cdTitle: pt.cdTitle,
+        composer: '',
+        title: pt.title,
+        description: '',
+        version: '',
+        filename: pt.filename,
+        releasedAt: 0,
+        number: 0,
+        cdDescription: '',
+        duration: pt.duration,
+        bpm: 0,
+        priority: 0,
+        keywords: '',
+        isChild: 0,
+        parent: 0,
+        mood: 0,
+        solo: 0,
+        vocal: 0,
+        featured: 0,
+        lyric: '',
+      );
+      final file = File(t.audioPath);
+      if (await file.exists()) {
+        encoder.addFile(file);
+      }
+    }
+    encoder.close();
+
+    // 4) Prompt user for save location
+    final saveLocation = await getSaveLocation(
+      suggestedName: '${pl.name}.zip',
+      acceptedTypeGroups: [
+        XTypeGroup(label: 'ZIP Archive', extensions: ['zip']),
+      ],
+    );
+    if (saveLocation != null) {
+      try {
+        await tempZip.copy(saveLocation.path);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Playlist saved to ${saveLocation.path}')),
+        );
+      } catch (e) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error saving ZIP: $e')));
+      }
+    }
+
+    // 5) Clean up the temporary ZIP file
+    if (await tempZip.exists()) {
+      await tempZip.delete();
+    }
   }
 
-  // --- UI builders ---
-  Widget _buildPlaylistItem(Playlist pl) {
+  Widget _buildItem(Playlist pl) {
     final isEditing = editingPlaylistId == pl.id;
     return ListTile(
       key: ValueKey(pl.id),
@@ -162,19 +191,16 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
               ? TextField(
                 controller: editingController..text = pl.name,
                 autofocus: true,
-                onSubmitted: (val) {
-                  final trimmed = val.trim();
-                  if (trimmed.isNotEmpty && trimmed != pl.name) {
-                    _renamePlaylist(pl.id, trimmed);
+                onSubmitted: (v) {
+                  if (v.trim().isNotEmpty) {
+                    _renamePlaylist(pl.id, v.trim());
                   }
                   setState(() => editingPlaylistId = null);
                 },
-                onEditingComplete:
-                    () => setState(() => editingPlaylistId = null),
               )
               : Text(pl.name),
       subtitle: Text(
-        '${pl.createdAt.toLocal().toString().split(' ')[0]} • ${pl.trackCount} tracks',
+        '${pl.createdAt.toLocal().toIso8601String().split('T')[0]} • ${pl.trackCount} tracks',
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -188,6 +214,11 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
                 editingController.text = pl.name;
               });
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.archive),
+            tooltip: 'Download as ZIP',
+            onPressed: () => _downloadPlaylist(pl),
           ),
           IconButton(
             icon: const Icon(Icons.delete),
@@ -206,7 +237,6 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
       width: 250,
       child: Column(
         children: [
-          // --- 1) Search field ---
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: TextField(
@@ -215,18 +245,18 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
                 prefixIcon: Icon(Icons.search),
                 border: OutlineInputBorder(),
               ),
-              onChanged: _onSearchChanged,
+              onChanged: (v) {
+                _searchQuery = v;
+                _refreshDisplayList();
+              },
             ),
           ),
-
-          // --- 2) Sort dropdown ---
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0),
             child: DropdownButtonFormField<_SortOption>(
               decoration: const InputDecoration(
                 labelText: 'Sort by',
                 border: OutlineInputBorder(),
-                isDense: true,
               ),
               value: _sortOption,
               items: const [
@@ -236,22 +266,21 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
                   child: Text('Date Created'),
                 ),
               ],
-              onChanged: _onSortChanged,
+              onChanged: (v) {
+                if (v != null) {
+                  _sortOption = v;
+                  _refreshDisplayList();
+                }
+              },
             ),
           ),
-
           const Divider(),
-
-          // --- 3) Playlist list ---
           Expanded(
             child: ListView(
-              children: _displayedPlaylists.map(_buildPlaylistItem).toList(),
+              children: _displayedPlaylists.map(_buildItem).toList(),
             ),
           ),
-
           const Divider(),
-
-          // --- 4) Inline “new playlist” row or button ---
           if (isCreatingNew)
             Padding(
               padding: const EdgeInsets.all(8.0),
@@ -269,7 +298,11 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
                   ElevatedButton(
                     onPressed: () {
                       final name = newPlaylistController.text.trim();
-                      if (name.isNotEmpty) _createNewPlaylist(name);
+                      if (name.isNotEmpty) {
+                        PlaylistService.createPlaylist(
+                          name,
+                        ).then((_) => _fetchPlaylists());
+                      }
                       setState(() {
                         isCreatingNew = false;
                         newPlaylistController.clear();
@@ -284,9 +317,9 @@ class _PlaylistSidebarState extends State<PlaylistSidebar> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: () => setState(() => isCreatingNew = true),
                 icon: const Icon(Icons.add),
                 label: const Text('New Playlist'),
+                onPressed: () => setState(() => isCreatingNew = true),
               ),
             ),
         ],
